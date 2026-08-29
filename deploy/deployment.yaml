@@ -1,0 +1,142 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: pangolin-newt
+  namespace: pangolin
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: pangolin-blueprint-controller
+rules:
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: pangolin-blueprint-controller
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: pangolin-blueprint-controller
+subjects:
+  - kind: ServiceAccount
+    name: pangolin-newt
+    namespace: pangolin
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pangolin-newt
+  namespace: pangolin
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: pangolin-newt
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: pangolin-newt
+    spec:
+      serviceAccountName: pangolin-newt
+      automountServiceAccountToken: false
+      securityContext:
+        fsGroup: 65532
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        - name: initialize-blueprint
+          image: docker.io/library/busybox:1.37.0
+          command: ["sh", "-c", "printf 'public-resources: {}\\n' > /var/run/pangolin/blueprint.yaml"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65532
+          volumeMounts:
+            - name: blueprint
+              mountPath: /var/run/pangolin
+      containers:
+        - name: newt
+          image: docker.io/fosrl/newt:1.12.3
+          args: ["--blueprint-file", "/var/run/pangolin/blueprint.yaml"]
+          envFrom:
+            - secretRef:
+                name: newt-auth
+          volumeMounts:
+            - name: blueprint
+              mountPath: /var/run/pangolin
+              readOnly: true
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 128Mi
+        - name: blueprint-controller
+          image: ghcr.io/hirrrooo/pangolin-blueprint-controller:v0.1.0
+          args:
+            - --output=/var/run/pangolin/blueprint.yaml
+            - --debounce=750ms
+          ports:
+            - name: health
+              containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: health
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65532
+          volumeMounts:
+            - name: blueprint
+              mountPath: /var/run/pangolin
+            - name: kubernetes-api-access
+              mountPath: /var/run/secrets/kubernetes.io/serviceaccount
+              readOnly: true
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 128Mi
+      volumes:
+        - name: blueprint
+          emptyDir:
+            medium: Memory
+        - name: kubernetes-api-access
+          projected:
+            defaultMode: 0444
+            sources:
+              - serviceAccountToken:
+                  path: token
+                  expirationSeconds: 3600
+              - configMap:
+                  name: kube-root-ca.crt
+                  items:
+                    - key: ca.crt
+                      path: ca.crt
+              - downwardAPI:
+                  items:
+                    - path: namespace
+                      fieldRef:
+                        apiVersion: v1
+                        fieldPath: metadata.namespace
