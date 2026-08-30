@@ -42,7 +42,7 @@ jobs:
         run: go build -trimpath ./cmd/pangolin-blueprint-controller
 
       - name: Validate Kubernetes manifest
-        run: kubectl apply --dry-run=client --validate=false -f deploy/deployment.yaml
+        run: go test -v ./deploy
 
       - name: Build container
         run: docker build --tag pangolin-blueprint-controller:ci .
