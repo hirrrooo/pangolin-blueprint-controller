@@ -22,13 +22,13 @@ The project is in the `v0.x` release series. Its API and annotation contract are
 
 ## Quick start
 
-Create the Newt credentials expected by the sample deployment:
+Create the Newt credentials expected by the sample deployment (see `deploy/secrets.example.yaml` for a ready-to-use template):
 
 ```sh
 kubectl create namespace pangolin
 kubectl create secret generic newt-auth \
   --namespace pangolin \
-  --from-literal=PANGOLIN_ENDPOINT=https://pangolin.example.com \
+  --from-literal=PANGOLIN_ENDPOINT=https://app.pangolin.net \
   --from-literal=NEWT_ID='<newt-id>' \
   --from-literal=NEWT_SECRET='<newt-secret>'
 ```
@@ -465,17 +465,11 @@ Deployment steps:
 1. Build and publish the controller image.
 2. Replace the example version in `deploy/deployment.yaml` with the release tag or immutable digest you want to deploy.
 3. Create namespace `pangolin`.
-4. Create Secret `newt-auth` containing `PANGOLIN_ENDPOINT`, `NEWT_ID`, and `NEWT_SECRET`.
-5. Create or synchronize public-policy Secrets in `pangolin-policies`.
-6. Apply the manifest.
+4. Create Secret `newt-auth` in namespace `pangolin` (see `deploy/secrets.example.yaml`).
+5. (Optional) Create policy Secrets in `pangolin-policies` if using `pangolin.net/policy`.
+6. Apply the manifest:
 
 ```sh
-kubectl create namespace pangolin
-kubectl create secret generic newt-auth \
-  --namespace pangolin \
-  --from-literal=PANGOLIN_ENDPOINT=https://pangolin.example.com \
-  --from-literal=NEWT_ID='<newt-id>' \
-  --from-literal=NEWT_SECRET='<newt-secret>'
 kubectl apply -f deploy/deployment.yaml
 ```
 
