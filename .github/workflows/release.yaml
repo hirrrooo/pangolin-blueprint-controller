@@ -99,7 +99,7 @@ jobs:
           mkdir -p dist
           sed "s|image: ${IMAGE}:.*|image: ${IMAGE}:${GITHUB_REF_NAME}@${DIGEST}|" \
             deploy/deployment.yaml > dist/deployment.yaml
-          cp deploy/secrets.example.yaml dist/secrets.example.yaml
+          cp deploy/secrets.yaml.example dist/secrets.yaml.example
 
       - name: Create GitHub release
         env:
@@ -125,4 +125,4 @@ jobs:
             --notes-file release-notes.md \
             --verify-tag \
             dist/deployment.yaml \
-            dist/secrets.example.yaml
+            dist/secrets.yaml.example
