@@ -33,10 +33,10 @@ kubectl create secret generic newt-auth \
   --from-literal=NEWT_SECRET='<newt-secret>'
 ```
 
-Review `deploy/deployment.yaml`, select a released controller image tag or digest, and apply it:
+Deploy directly from the release assets (or from local `deploy/deployment.yaml`):
 
 ```sh
-kubectl apply -f deploy/deployment.yaml
+kubectl apply -f https://github.com/hirrrooo/pangolin-blueprint-controller/releases/latest/download/deployment.yaml
 kubectl rollout status -n pangolin deploy/pangolin-newt
 kubectl logs -n pangolin deploy/pangolin-newt -c blueprint-controller -f
 ```

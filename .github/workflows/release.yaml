@@ -91,6 +91,16 @@ jobs:
           DIGEST: ${{ steps.build.outputs.digest }}
         run: cosign sign --yes "${IMAGE}@${DIGEST}"
 
+      - name: Render release manifests
+        shell: bash
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          mkdir -p dist
+          sed "s|image: ${IMAGE}:.*|image: ${IMAGE}:${GITHUB_REF_NAME}@${DIGEST}|" \
+            deploy/deployment.yaml > dist/deployment.yaml
+          cp deploy/secrets.example.yaml dist/secrets.example.yaml
+
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -104,10 +114,15 @@ jobs:
           {
             printf '## Container image\n\n'
             printf '`%s@%s`\n\n' "${IMAGE}" "${DIGEST}"
-            printf 'The image is available for Linux AMD64 and ARM64 with an SBOM, provenance, and keyless Cosign signature.\n\n'
+            printf '## Quick Install\n\n'
+            printf '```sh\n'
+            printf 'kubectl apply -f https://github.com/%s/releases/download/%s/deployment.yaml\n' "${GITHUB_REPOSITORY}" "${GITHUB_REF_NAME}"
+            printf '```\n\n'
             printf '%s\n' "${generated_notes}"
           } > release-notes.md
           gh release create "${GITHUB_REF_NAME}" \
             --title "${GITHUB_REF_NAME}" \
             --notes-file release-notes.md \
-            --verify-tag
+            --verify-tag \
+            dist/deployment.yaml \
+            dist/secrets.example.yaml
