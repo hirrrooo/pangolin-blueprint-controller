@@ -1,4 +1,9 @@
 apiVersion: v1
+kind: Namespace
+metadata:
+  name: pangolin-policies
+---
+apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: pangolin-newt
@@ -21,6 +26,30 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
   name: pangolin-blueprint-controller
+subjects:
+  - kind: ServiceAccount
+    name: pangolin-newt
+    namespace: pangolin
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: pangolin-blueprint-policy-reader
+  namespace: pangolin-policies
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: pangolin-blueprint-policy-reader
+  namespace: pangolin-policies
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: pangolin-blueprint-policy-reader
 subjects:
   - kind: ServiceAccount
     name: pangolin-newt
@@ -86,6 +115,7 @@ spec:
           args:
             - --output=/var/run/pangolin/blueprint.yaml
             - --debounce=750ms
+            - --policy-namespace=pangolin-policies
           ports:
             - name: health
               containerPort: 8080

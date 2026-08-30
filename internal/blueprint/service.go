@@ -18,6 +18,7 @@ const (
 	AnnotationPort           = "pangolin.net/port"
 	AnnotationProxyPort      = "pangolin.net/proxy-port"
 	AnnotationMethod         = "pangolin.net/method"
+	AnnotationPolicy         = "pangolin.net/policy"
 	AnnotationResourceID     = "pangolin.net/resource-id"
 	AnnotationName           = "pangolin.net/name"
 	AnnotationSSOEnabled     = "pangolin.net/sso-enabled"
@@ -53,6 +54,19 @@ func FromService(service *corev1.Service) (string, PublicResource, bool, error) 
 		return "", PublicResource{}, true, fmt.Errorf("%s must be non-empty without surrounding whitespace", AnnotationResourceID)
 	}
 
+	policy := annotations[AnnotationPolicy]
+	if strings.TrimSpace(policy) != policy {
+		return "", PublicResource{}, true, fmt.Errorf("%s must not contain surrounding whitespace", AnnotationPolicy)
+	}
+	if policy != "" {
+		if policy == ReservedNewtSecretName {
+			return "", PublicResource{}, true, fmt.Errorf("%s must not reference reserved Secret %q", AnnotationPolicy, ReservedNewtSecretName)
+		}
+		if problems := validation.IsDNS1123Subdomain(policy); len(problems) > 0 {
+			return "", PublicResource{}, true, fmt.Errorf("%s is not a valid Secret name: %s", AnnotationPolicy, strings.Join(problems, ", "))
+		}
+	}
+
 	resource := PublicResource{
 		Name: valueOr(annotations[AnnotationName], service.Namespace+"/"+service.Name),
 		Mode: mode,
@@ -77,17 +91,24 @@ func FromService(service *corev1.Service) (string, PublicResource, bool, error) 
 		if _, ok := annotations[AnnotationProxyPort]; ok {
 			return "", PublicResource{}, true, fmt.Errorf("%s is only valid for TCP or UDP resources", AnnotationProxyPort)
 		}
-		resource.Auth, err = parseAuth(annotations)
-		if err != nil {
-			return "", PublicResource{}, true, err
-		}
-		resource.Rules, err = parseRules(annotations[AnnotationRules])
-		if err != nil {
-			return "", PublicResource{}, true, err
+		if policy != "" {
+			if hasAuthAnnotations(annotations) || annotations[AnnotationRules] != "" {
+				return "", PublicResource{}, true, fmt.Errorf("%s cannot be combined with direct auth or rules annotations", AnnotationPolicy)
+			}
+			resource.Policy = policy
+		} else {
+			resource.Auth, err = parseAuth(annotations)
+			if err != nil {
+				return "", PublicResource{}, true, err
+			}
+			resource.Rules, err = parseRules(annotations[AnnotationRules])
+			if err != nil {
+				return "", PublicResource{}, true, err
+			}
 		}
 	} else {
-		if annotations[AnnotationDomain] != "" || hasAuthAnnotations(annotations) || annotations[AnnotationRules] != "" || annotations[AnnotationMethod] != "" {
-			return "", PublicResource{}, true, fmt.Errorf("domain, method, auth, and rules annotations are only valid for HTTP resources")
+		if annotations[AnnotationDomain] != "" || annotations[AnnotationPolicy] != "" || hasAuthAnnotations(annotations) || annotations[AnnotationRules] != "" || annotations[AnnotationMethod] != "" {
+			return "", PublicResource{}, true, fmt.Errorf("domain, method, policy, auth, and rules annotations are only valid for HTTP resources")
 		}
 		resource.ProxyPort, err = parsePort(annotations[AnnotationProxyPort], AnnotationProxyPort)
 		if err != nil {
@@ -162,20 +183,27 @@ func parseRules(raw string) ([]Rule, error) {
 	}
 	var rules []Rule
 	if err := json.Unmarshal([]byte(raw), &rules); err != nil {
-		return nil, fmt.Errorf("%s must be a JSON array: %w", AnnotationRules, err)
+		return nil, fmt.Errorf("%s must be a JSON array", AnnotationRules)
 	}
-	for index, rule := range rules {
-		if _, ok := validRuleActions[rule.Action]; !ok {
-			return nil, fmt.Errorf("%s rule %d has invalid action %q", AnnotationRules, index, rule.Action)
-		}
-		if _, ok := validRuleMatches[rule.Match]; !ok {
-			return nil, fmt.Errorf("%s rule %d has invalid match %q", AnnotationRules, index, rule.Match)
-		}
-		if rule.Value == "" {
-			return nil, fmt.Errorf("%s rule %d has an empty value", AnnotationRules, index)
-		}
+	if err := validateRules(rules, AnnotationRules); err != nil {
+		return nil, err
 	}
 	return rules, nil
+}
+
+func validateRules(rules []Rule, field string) error {
+	for index, rule := range rules {
+		if _, ok := validRuleActions[rule.Action]; !ok {
+			return fmt.Errorf("%s rule %d has invalid action %q", field, index, rule.Action)
+		}
+		if _, ok := validRuleMatches[rule.Match]; !ok {
+			return fmt.Errorf("%s rule %d has invalid match %q", field, index, rule.Match)
+		}
+		if rule.Value == "" {
+			return fmt.Errorf("%s rule %d has an empty value", field, index)
+		}
+	}
+	return nil
 }
 
 func parsePort(raw, annotation string) (int32, error) {

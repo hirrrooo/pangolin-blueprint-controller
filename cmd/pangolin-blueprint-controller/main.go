@@ -9,23 +9,29 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/clientcmd"
 
+	"github.com/hirrrooo/pangolin-blueprint-controller/internal/blueprint"
 	"github.com/hirrrooo/pangolin-blueprint-controller/internal/controller"
 )
 
 type options struct {
-	output     string
-	debounce   time.Duration
-	kubeconfig string
-	healthAddr string
-	logLevel   string
+	output          string
+	debounce        time.Duration
+	kubeconfig      string
+	policyNamespace string
+	healthAddr      string
+	logLevel        string
 }
 
 func main() {
@@ -48,6 +54,7 @@ func parseFlags() options {
 	flag.StringVar(&value.output, "output", "/var/run/pangolin/blueprint.yaml", "blueprint output path")
 	flag.DurationVar(&value.debounce, "debounce", 750*time.Millisecond, "quiet period before regenerating the blueprint")
 	flag.StringVar(&value.kubeconfig, "kubeconfig", "", "kubeconfig path; empty uses in-cluster configuration")
+	flag.StringVar(&value.policyNamespace, "policy-namespace", "pangolin-policies", "namespace containing labeled Pangolin public-policy Secrets")
 	flag.StringVar(&value.healthAddr, "health-address", ":8080", "health and readiness listen address")
 	flag.StringVar(&value.logLevel, "log-level", "info", "debug, info, warn, or error")
 	flag.Parse()
@@ -65,9 +72,11 @@ func run(ctx context.Context, options options, logger *slog.Logger) error {
 	if err != nil {
 		return fmt.Errorf("create Kubernetes client: %w", err)
 	}
-	factory := informers.NewSharedInformerFactory(client, 0)
-	serviceInformer := factory.Core().V1().Services().Informer()
-	serviceController, err := controller.New(serviceInformer, options.output, options.debounce, logger)
+	serviceInformer, policyInformer, err := newInformers(client, options.policyNamespace)
+	if err != nil {
+		return err
+	}
+	serviceController, err := controller.New(serviceInformer, policyInformer, options.policyNamespace, options.output, options.debounce, logger)
 	if err != nil {
 		return err
 	}
@@ -98,6 +107,22 @@ func run(ctx context.Context, options options, logger *slog.Logger) error {
 		runError = fmt.Errorf("shut down health server: %w", err)
 	}
 	return runError
+}
+
+func newInformers(client kubernetes.Interface, policyNamespace string) (cache.SharedIndexInformer, cache.SharedIndexInformer, error) {
+	if problems := validation.IsDNS1123Label(policyNamespace); len(problems) > 0 {
+		return nil, nil, fmt.Errorf("invalid policy namespace %q: %s", policyNamespace, strings.Join(problems, ", "))
+	}
+	serviceFactory := informers.NewSharedInformerFactory(client, 0)
+	policyFactory := informers.NewSharedInformerFactoryWithOptions(
+		client,
+		0,
+		informers.WithNamespace(policyNamespace),
+		informers.WithTweakListOptions(func(listOptions *metav1.ListOptions) {
+			listOptions.LabelSelector = blueprint.PolicySecretLabel + "=" + blueprint.PolicySecretLabelValue
+		}),
+	)
+	return serviceFactory.Core().V1().Services().Informer(), policyFactory.Core().V1().Secrets().Informer(), nil
 }
 
 func kubernetesConfig(kubeconfig string) (*rest.Config, error) {

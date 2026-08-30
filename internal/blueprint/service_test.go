@@ -45,6 +45,21 @@ func TestFromServiceHTTP(t *testing.T) {
 	}
 }
 
+func TestFromServiceHTTPPolicyReference(t *testing.T) {
+	service := testService(map[string]string{
+		AnnotationPublic: "true",
+		AnnotationDomain: "app.example.com",
+		AnnotationPolicy: "authenticated-members",
+	})
+	_, resource, optedIn, err := FromService(service)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !optedIn || resource.Policy != "authenticated-members" || resource.Auth != nil || len(resource.Rules) != 0 {
+		t.Fatalf("unexpected policy resource: %#v", resource)
+	}
+}
+
 func TestFromServiceRawResource(t *testing.T) {
 	service := testService(map[string]string{
 		AnnotationPublic:    "true",
@@ -83,6 +98,11 @@ func TestFromServiceValidation(t *testing.T) {
 		{name: "bad mode", annotations: map[string]string{AnnotationPublic: "true", AnnotationMode: "icmp"}, wantError: AnnotationMode},
 		{name: "raw missing proxy port", annotations: map[string]string{AnnotationPublic: "true", AnnotationMode: "udp"}, wantError: AnnotationProxyPort},
 		{name: "raw auth", annotations: map[string]string{AnnotationPublic: "true", AnnotationMode: "tcp", AnnotationProxyPort: "443", AnnotationSSOEnabled: "true"}, wantError: "only valid for HTTP"},
+		{name: "raw policy", annotations: map[string]string{AnnotationPublic: "true", AnnotationMode: "tcp", AnnotationProxyPort: "443", AnnotationPolicy: "members"}, wantError: "only valid for HTTP"},
+		{name: "policy with auth", annotations: map[string]string{AnnotationPublic: "true", AnnotationDomain: "app.example.com", AnnotationPolicy: "members", AnnotationSSOEnabled: "true"}, wantError: "cannot be combined"},
+		{name: "policy with rules", annotations: map[string]string{AnnotationPublic: "true", AnnotationDomain: "app.example.com", AnnotationPolicy: "members", AnnotationRules: `[{"action":"deny","match":"country","value":"XX"}]`}, wantError: "cannot be combined"},
+		{name: "invalid policy name", annotations: map[string]string{AnnotationPublic: "true", AnnotationDomain: "app.example.com", AnnotationPolicy: "NOT VALID"}, wantError: "valid Secret name"},
+		{name: "reserved policy", annotations: map[string]string{AnnotationPublic: "true", AnnotationDomain: "app.example.com", AnnotationPolicy: ReservedNewtSecretName}, wantError: "reserved"},
 		{name: "invalid method", annotations: map[string]string{AnnotationPublic: "true", AnnotationDomain: "app.example.com", AnnotationMethod: "ftp"}, wantError: AnnotationMethod},
 		{name: "invalid bool", annotations: map[string]string{AnnotationPublic: "true", AnnotationDomain: "app.example.com", AnnotationSSOEnabled: "sometimes"}, wantError: AnnotationSSOEnabled},
 		{name: "invalid rules JSON", annotations: map[string]string{AnnotationPublic: "true", AnnotationDomain: "app.example.com", AnnotationRules: "["}, wantError: "JSON array"},
@@ -112,7 +132,10 @@ func TestBuildOmitsInvalidAndDuplicateResources(t *testing.T) {
 	secondDuplicate := testService(map[string]string{AnnotationPublic: "true", AnnotationDomain: "two.example.com", AnnotationResourceID: "shared"})
 	secondDuplicate.Name = "two"
 
-	result, serviceErrors := Build([]*corev1.Service{secondDuplicate, invalid, valid, firstDuplicate})
+	result, serviceErrors, policyErrors := Build([]*corev1.Service{secondDuplicate, invalid, valid, firstDuplicate}, nil)
+	if len(policyErrors) != 0 {
+		t.Fatal(policyErrors)
+	}
 	if len(result.PublicResources) != 1 {
 		t.Fatalf("got resources %#v", result.PublicResources)
 	}
@@ -130,7 +153,10 @@ func TestBuildOmitsInvalidAndDuplicateResources(t *testing.T) {
 
 func TestMarshalUsesPangolinFieldNames(t *testing.T) {
 	service := testService(map[string]string{AnnotationPublic: "true", AnnotationDomain: "app.example.com"})
-	result, serviceErrors := Build([]*corev1.Service{service})
+	result, serviceErrors, policyErrors := Build([]*corev1.Service{service}, nil)
+	if len(policyErrors) != 0 {
+		t.Fatal(policyErrors)
+	}
 	if len(serviceErrors) != 0 {
 		t.Fatal(serviceErrors)
 	}
