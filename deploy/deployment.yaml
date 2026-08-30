@@ -95,7 +95,7 @@ spec:
               mountPath: /var/run/pangolin
       containers:
         - name: newt
-          image: docker.io/fosrl/newt:1.12.3
+          image: docker.io/fosrl/newt:1.16.0
           args: ["--blueprint-file", "/var/run/pangolin/blueprint.yaml"]
           envFrom:
             - secretRef:

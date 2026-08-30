@@ -16,7 +16,7 @@ The project is in the `v0.x` release series. Its API and annotation contract are
 | Component | Support |
 | --- | --- |
 | Kubernetes | 1.30 or newer |
-| Newt | Sample manifest pins 1.12.3 |
+| Newt | Sample manifest pins 1.16.0 |
 | Pangolin modes | HTTP, TCP, UDP |
 | Container platforms | Linux AMD64 and ARM64 |
 
